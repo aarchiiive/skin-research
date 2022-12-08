@@ -195,7 +195,7 @@ def train(dataset_path,
     
     # dataloaders
     trainloader, testloader = dataloader(os.path.join(dataset_path, "train"),
-                                         os.path.join(dataset_path, "train"),
+                                         os.path.join(dataset_path, "val"),
                                         [os.path.join(dataset_path, "label/train.csv"),
                                          os.path.join(dataset_path, "label/val.csv")],
                                          input_size=input_size,

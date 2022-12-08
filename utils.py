@@ -51,8 +51,7 @@ def dataloader(train_path,
     
     # augentations
     train_transform = transforms.Compose([
-        # transforms.Resize((input_size, input_size)),
-        transforms.Resize((int(input_size * 1.25), int(input_size * 1.25))),
+        transforms.Resize((input_size, input_size)),
         transforms.ToTensor(),
         transforms.RandomAffine(degrees=(-15, 15), translate=(0.05, 0.1)),
         transforms.RandomResizedCrop(size=(input_size, input_size), scale=(0.75, 1.0)),
