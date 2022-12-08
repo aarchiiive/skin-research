@@ -132,6 +132,14 @@ def train_model(model,
         
         torch.save(model.state_dict(), "weights/{}/last.pt".format(save_path))
         f.close()
+        
+    except torch.cuda.OutOfMemoryError:
+        f.close()
+        if epoch == 0:
+            os.remove(os.path.join("weights", save_path, "log.txt"))
+            
+        print("Error : torch.cuda.OutOfMemoryError")
+        exit()
 
     time_elapsed = time.time() - since
     
