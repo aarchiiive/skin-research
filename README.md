@@ -2,6 +2,13 @@
 
 main.py 안의 주석을 확인해주세요!
 
+필요한 라이브러리 설치하기
+
+```
+pip install -r requirements.txt
+```
+
+
 data폴더를 생성해주세요.
 폴더 내의 구조는 다음과 같습니다.
 
