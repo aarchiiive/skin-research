@@ -18,7 +18,29 @@ if __name__ == "__main__":
         num_workers (int, optional): cpu 코어 성능에 따라서 늘리거나 줄여주세요. Defaults to 10.
         resume (_type_, optional): 학습을 재개하고 싶다면 True를 넣어주세요 -> save_path에 있는 last.pt를 불러옴 . Defaults to None.
         start (int, optional): _description_. Defaults to 0.
-    
+        
+    [model list]
+    - resnet50
+    - resnet101
+    - resnet152
+    - resnext50
+    - resnext101
+    - densenet121
+    - densenet161
+    - densenet169
+    - densenet201
+    - efficientnet_b5
+    - efficientnet_b6
+    - efficientnet_b7
+    - efficientnet_v2_s
+    - efficientnet_v2_m
+    - efficientnet_v2_l
+    - xception
+    - xception41
+    - xception41p
+    - xception65
+    - xception65p
+    - xception71s
     
     조정해야할 parameter는 num_epochs, batch_size, num_workers입니다.
     CUDA memroy error가 발생하거나 CPU/RAM 관련 error가 발생하면 batch_size, num_workers를 낮춰보는 것을 추천드립니다.
