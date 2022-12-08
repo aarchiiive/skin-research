@@ -161,6 +161,9 @@ def train(dataset_path,
     if not os.path.isdir("weights"):
         os.mkdir("weights")
         
+    if not os.path.isdir("data"):
+        os.mkdir("data")
+        
     if not os.path.isdir(os.path.join("weights", save_path)):
         os.mkdir(os.path.join("weights", save_path))
     
