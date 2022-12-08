@@ -49,6 +49,7 @@ def dataloader(train_path,
     
     train_label_path, test_label_path = label_path
     
+    # augentations
     train_transform = transforms.Compose([
         # transforms.Resize((input_size, input_size)),
         transforms.Resize((int(input_size * 1.25), int(input_size * 1.25))),
