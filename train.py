@@ -227,8 +227,8 @@ def train(dataset_path,
                 start=start)
     
     # test model
-    test(os.path.join(dataset_path, "test"),
-         os.path.join(dataset_path, "test"),
-         os.path.join("weights", save_path),
-         model_name=model_name,
-         device=device)
+    # test(os.path.join(dataset_path, "test"),
+    #      os.path.join(dataset_path, "test"),
+    #      os.path.join("weights", save_path),
+    #      model_name=model_name,
+    #      device=device)
