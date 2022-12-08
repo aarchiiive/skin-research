@@ -167,8 +167,8 @@ def train(dataset_path,
     if not os.path.isdir(os.path.join("weights", save_path)):
         os.mkdir(os.path.join("weights", save_path))
     
-    # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    device = torch.device("cpu")
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    # device = torch.device("cpu")
     
     print("save weights in {}....".format(save_path))
     print("save hyperparmeters......")
