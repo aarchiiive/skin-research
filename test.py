@@ -13,7 +13,7 @@ from utils import *
 from model import _models
 
 
-def test(image_path,
+def test_model(image_path,
          label_path,
          save_path, 
          model_name, 
