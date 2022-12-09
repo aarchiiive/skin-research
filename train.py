@@ -54,7 +54,7 @@ def train_model(model,
     
     learning_dict = {"train" : [],
                      "val" : []}
-    learning_columns = ["acc_0", "loss_0", "acc_1", "loss_1",
+    learning_columns = ["epoch", "acc_0", "loss_0", "acc_1", "loss_1",
                         "acc_2", "loss_2", "acc_3", "loss_3",
                         "accuracy", "loss"]
     
@@ -125,7 +125,7 @@ def train_model(model,
                     
                 print("\n[{}]".format(phase))
                 
-                row = []
+                row = [epoch]
                 
                 for i, correct_count in enumerate(correct_preds[phase]):
                     accuracy = 100 * float(correct_count) / total_preds[phase][i]
