@@ -3,13 +3,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.optim import lr_scheduler
-import torchvision
 
 from sklearn.utils.class_weight import compute_class_weight
-from sklearn.metrics import confusion_matrix
-from sklearn.metrics import roc_curve, auc
-from sklearn.metrics import roc_auc_score
-from sklearn import metrics
 import matplotlib.pyplot as plt
 
 # library
@@ -33,6 +28,7 @@ def train_model(model,
                 device,
                 save_path="", 
                 num_epochs=25,
+                batch_size=16,
                 num_classes=4, 
                 resume=False,
                 start=0):
@@ -50,13 +46,15 @@ def train_model(model,
     
     model = copy.deepcopy(model)
     model = model.to(device)
+    wandb.watch(model, log='all')
     criterion = criterion.to(device)
     
     learning_dict = {"train" : [],
                      "val" : []}
-    learning_columns = ["epoch", "acc_0", "loss_0", "acc_1", "loss_1",
-                        "acc_2", "loss_2", "acc_3", "loss_3",
-                        "accuracy", "loss"]
+    learning_columns = ["epoch"] \
+                     + ["acc_" + str(i) for i in range(num_classes)] \
+                     + ["loss_" + str(i) for i in range(num_classes)] \
+                     + ["best", "accuracy", "loss"]
     
     if resume or os.path.isfile(os.path.join(weights_path, "train.csv")):
         print("Restart training model....")
@@ -64,13 +62,14 @@ def train_model(model,
         
         _train = pd.read_csv(os.path.join(weights_path, "train.csv"))
         _val = pd.read_csv(os.path.join(weights_path, "val.csv"))
-        
+        # df = {"train" : _train, "val" : _val}
         for t, v in zip(_train.values, _val.values):
             learning_dict["train"].append(t)
             learning_dict["val"].append(v)
 
         start = len(_train)
         
+    class_names = [str(i) for i in range(num_classes)]
     max_acc = {"train" : [0 for _ in range(num_classes)],
                "val" : [0 for _ in range(num_classes)]}  
     running_losses = {"train" : [0 for _ in range(num_classes)],
@@ -93,9 +92,14 @@ def train_model(model,
 
                 running_loss = 0.0
                 
-                for l in [max_acc, running_losses, total_preds, correct_preds]:
+                for l in [running_losses, total_preds, correct_preds]:
                     for p in ["train", "val"]:
                         l[p] = [0 for _ in range(num_classes)]
+                        
+                # metrics = dict()
+                running_labels = None
+                running_probs = None
+                running_preds = None
                 
                 gc.collect()
                 torch.cuda.empty_cache()
@@ -105,12 +109,13 @@ def train_model(model,
                     labels = labels.to(device)
                 
                     optimizer.zero_grad()
+                    
 
                     with torch.set_grad_enabled(phase == "train"):
                         outputs = model(inputs)
                         _, preds = torch.max(outputs, 1)
                         loss = criterion(outputs, labels.long())
-                                    
+                        
                         for label, output, pred in zip(labels, outputs, preds):
                             if label == pred:
                                 correct_preds[phase][label] += 1
@@ -120,6 +125,15 @@ def train_model(model,
                         if phase == "train":
                             loss.backward()
                             optimizer.step()
+                        else:
+                            if running_labels is None:
+                                running_labels = labels
+                                running_probs = outputs
+                                running_preds = preds
+                            else:
+                                running_labels = torch.cat((running_labels, labels),dim=0)
+                                running_probs = torch.cat((running_probs, outputs),dim=0)
+                                running_preds = torch.cat((running_preds, preds),dim=0)
                         
                     running_loss += loss.item() * inputs.size(0)
                     
@@ -132,21 +146,42 @@ def train_model(model,
                     loss = running_losses[phase][i].item() / total_preds[phase][i]
                     
                     if accuracy > max_acc[phase][i]:
-                        if accuracy > 0.7 and phase == "val":
-                            max_acc[phase][i] = accuracy
-                        torch.save(model.state_dict(), os.path.join(weights_path, "best.pt"))
+                        max_acc[phase][i] = accuracy
+                        torch.save(model.state_dict(), os.path.join(weights_path, "best_{}.pt".format(i)))
                         
                     row.append(accuracy)
                     row.append(loss)
-                        
+                    # if phase == "val":
+                    #     metrics['val_acc_{}'.format(i)] = accuracy
+                    #     metrics['val_loss_{}'.format(i)] = loss
+                    
                     print("Accuracy for class(level {}) : {:.4f}% ({}/{}), best : {:.4f}%, loss : {:.4f}".\
                         format(i, accuracy, correct_count, 
                                total_preds[phase][i], max_acc[phase][i], loss))    
                 
                 total = sum(correct_preds[phase]) / sum(total_preds[phase]) * 100
                 epoch_loss = running_loss / len(dataloaders[phase].dataset)
+                if total > best_acc  and phase == "val":
+                    best_acc = total
+                    torch.save(model.state_dict(), os.path.join(weights_path, "best.pt"))
+                
+                row.append(best_acc)
                 row.append(total)
                 row.append(epoch_loss)
+                
+                if phase == "val":
+                    # metrics["val_acc"] = total
+                    # metrics["val_loss"] = epoch_loss
+                    # wandb.log(metrics, step=epoch)
+                    wandb.log({"pr" : wandb.plot.pr_curve(running_labels.cpu(), running_probs.cpu(), labels=class_names, classes_to_plot=None)})
+                    wandb.log({"roc" : wandb.plot.roc_curve(running_labels.cpu(), running_probs.cpu(), labels=class_names, classes_to_plot=None)})
+                    print("Best accuracy  : {:.4f}%".format(best_acc))
+                else:
+                    pass
+                    # metrics["train_acc"] = total
+                    # metrics["train_loss"] = epoch_loss
+                    # wandb.log(metrics, step=epoch)
+                    
                 print("Total accuracy : {:.4f}%".format(total))
                 print("Total loss     : {:.4f}%".format(epoch_loss))
                 
@@ -160,6 +195,7 @@ def train_model(model,
             val_dict = pd.DataFrame(learning_dict["val"], columns=learning_columns)
             train_dict.to_csv(os.path.join(weights_path, "train.csv"), index=False)
             val_dict.to_csv(os.path.join(weights_path, "val.csv"), index=False)
+            log_to_wandb(train_dict, val_dict, num_classes)
                 
             print()
             
@@ -206,13 +242,10 @@ def train(dataset_path,
           num_workers=10,
           resume=False,
           start=0):
+
     
     if not os.path.isdir("weights"):
         os.mkdir("weights")
-        
-    if not os.path.isdir("data"):
-        os.mkdir("data")
-        
     if not os.path.isdir(os.path.join("weights", save_path)):
         os.mkdir(os.path.join("weights", save_path))
     
@@ -223,6 +256,7 @@ def train(dataset_path,
     print("save weights in {}....".format(save_path))
     print("save hyperparmeters......")
     save_params(os.path.join("weights", save_path),
+                save_path,
                 model_name,
                 num_epochs,
                 input_size,
@@ -266,7 +300,6 @@ def train(dataset_path,
     # scheduler
     scheduler = lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
     
-    
     # train model
     train_model(model,
                 dataloaders,
@@ -276,6 +309,7 @@ def train(dataset_path,
                 device,
                 save_path,
                 num_epochs,
+                batch_size,
                 num_classes,
                 resume=resume,
                 start=start)

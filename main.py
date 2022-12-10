@@ -60,6 +60,6 @@ if __name__ == "__main__":
     # train("data", "lab01", "xception41", batch_size=4, num_workers=8)
     # train("data", "lab02", "efficientnet_v2_l", batch_size=1, num_workers=8)
     # train("data", "lab03", "efficientnet_b6", batch_size=1, num_workers=8)
-    train("data", "lab05", "resnet50", batch_size=8, num_workers=8)
+    train("data", "lab03", "resnet50", batch_size=8, num_workers=8)
     # train("data", "lab02", "densenet169", batch_size=16)
     # train("data", "lab03", "xception41", num_epochs=30, num_workers=4)

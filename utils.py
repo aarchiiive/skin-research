@@ -2,17 +2,86 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 
-import cv2
-import copy
 import os
-import glob
-import random
 import numpy as np
 import pandas as pd
 from PIL import Image
-from tqdm import tqdm
+import wandb
+import matplotlib.pyplot as plt
 
-def save_params(save_path,
+# def _table(phase, x, y, columns, _type):
+    
+def log_to_wandb(train_dict, val_dict, num_classes):
+    # train
+    table = wandb.Table(data=[[x, y] for (x, y) in \
+                              zip(train_dict["epoch"].tolist(), 
+                                  train_dict["accuracy"].tolist())], \
+                                  columns = ["epoch", "accuracy"])
+    wandb.log({"train_accuracy" : wandb.plot.line(table, "epoch", "accuracy", title="train/accuracy")})
+    table = wandb.Table(data=[[x, y] for (x, y) in \
+                            zip(train_dict["epoch"].tolist(), 
+                                train_dict["loss"].tolist())], \
+                                columns = ["epoch", "loss"])
+    wandb.log({"train_loss" : wandb.plot.line(table, "epoch", "loss", title="train/loss")})
+    # valid
+    table = wandb.Table(data=[[x, y] for (x, y) in \
+                              zip(val_dict["epoch"].tolist(), 
+                                  val_dict["accuracy"].tolist())], \
+                                  columns = ["epoch", "accuracy"])
+    wandb.log({"valid_accuracy" : wandb.plot.line(table, "epoch", "accuracy", title="valid/accuracy")})
+    table = wandb.Table(data=[[x, y] for (x, y) in \
+                            zip(val_dict["epoch"].tolist(), 
+                                val_dict["loss"].tolist())], \
+                                columns = ["epoch", "loss"])
+    wandb.log({"valid_loss" : wandb.plot.line(table, "epoch", "loss", title="valid/loss")})
+    
+    for i in range(num_classes):
+        # train
+        table = wandb.Table(data=[[x, y] for (x, y) in \
+                            zip(train_dict["epoch"].tolist(), 
+                                train_dict["acc_{}".format(i)].tolist())], \
+                                columns = ["epoch", "accuracy"])
+        wandb.log({"train_acc_{}".format(i) : wandb.plot.line(table, "epoch", "accuracy", title="train/class {}".format(i))})
+        table = wandb.Table(data=[[x, y] for (x, y) in \
+                            zip(train_dict["epoch"].tolist(), 
+                                train_dict["loss_{}".format(i)].tolist())], \
+                                columns = ["epoch", "loss"])
+        wandb.log({"train_loss_{}".format(i) : wandb.plot.line(table, "epoch", "loss", title="train/class {}".format(i))})
+        # valid
+        table = wandb.Table(data=[[x, y] for (x, y) in \
+                            zip(val_dict["epoch"].tolist(), 
+                                val_dict["acc_{}".format(i)].tolist())], \
+                                columns = ["epoch", "accuracy"])
+        wandb.log({"valid_acc_{}".format(i) : wandb.plot.line(table, "epoch", "accuracy", title="valid/class {}".format(i))})
+        table = wandb.Table(data=[[x, y] for (x, y) in \
+                            zip(val_dict["epoch"].tolist(), 
+                                val_dict["loss_{}".format(i)].tolist())], \
+                                columns = ["epoch", "loss"])
+        wandb.log({"train_loss_{}".format(i) : wandb.plot.line(table, "epoch", "loss", title="valid/class {}".format(i))})
+        
+        
+        # fig = plt.figure()
+        # for i in range(num_classes):
+        #     ax = fig.add_subplot(2, i + 1, 1)
+        #     ax.plot(train_dict["epoch"].tolist(), train_dict["acc_{}".format(i)].tolist())
+        #     ax = fig.add_subplot(2, i + 1, 2)
+        #     ax.plot(train_dict["epoch"].tolist(), train_dict["loss_{}".format(i)].tolist())
+            
+        # wandb.log({"train_chart": fig})
+        # fig.clear()
+        
+        # fig = plt.figure()
+        # for i in range(num_classes):
+        #     ax = fig.add_subplot(2, i + 1, 1)
+        #     ax.plot(val_dict["epoch"].tolist(), val_dict["acc_{}".format(i)].tolist())
+        #     ax = fig.add_subplot(2, i + 1, 2)
+        #     ax.plot(val_dict["epoch"].tolist(), val_dict["loss_{}".format(i)].tolist())
+            
+        # wandb.log({"valid_chart": fig})
+            
+
+def save_params(weights_path,
+                save_path,
                 model_name,
                 num_epochs=25,
                 input_size=600,
@@ -23,6 +92,25 @@ def save_params(save_path,
                 drop_rate=0.2,
                 batch_size=8,
                 num_workers=10):
+    wandb.init(project="skin-research", name=save_path+"-"+model_name, tags=[model_name])
+
+    # if os.path.isfile(os.path.join(weights_path, "train.csv")):
+    #     wandb.init(project="skin-research", name=save_path+"-"+model_name, resume=True)
+    # else:
+    #     wandb.init(project="skin-research", name=save_path+"-"+model_name)
+        
+    wandb.config = {
+        "model_name" : model_name,
+        "num_epochs" : num_epochs,
+        "input_size" : input_size,
+        "num_classes" : num_classes,
+        "optimizer" : optimizer,
+        "learning_rate" : learning_rate,
+        "weight_decay" : weight_decay,
+        "drop_rate" : drop_rate,
+        "batch_size" : batch_size,
+        "num_workers" : num_workers
+    }
     
     df = pd.DataFrame.from_dict({
         "model_name" : [model_name],
@@ -37,7 +125,7 @@ def save_params(save_path,
         "num_workers" : [num_workers]
     }, orient="columns")
     
-    df.to_csv(os.path.join(save_path, "hyperparameters.csv"))
+    df.to_csv(os.path.join(weights_path, "hyperparameters.csv"))
 
 
 def dataloader(train_path,
