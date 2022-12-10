@@ -52,8 +52,7 @@ def train_model(model,
     learning_dict = {"train" : [],
                      "val" : []}
     learning_columns = ["epoch"] \
-                     + ["acc_" + str(i) for i in range(num_classes)] \
-                     + ["loss_" + str(i) for i in range(num_classes)] \
+                     + get_columns(num_classes) \
                      + ["best", "accuracy", "loss"]
     
     if resume or os.path.isfile(os.path.join(weights_path, "train.csv")):
@@ -313,10 +312,3 @@ def train(dataset_path,
                 num_classes,
                 resume=resume,
                 start=start)
-    
-    # test model
-    # test_model(os.path.join(dataset_path, "test"),
-    #      os.path.join(dataset_path, "test"),
-    #      os.path.join("weights", save_path),
-    #      model_name=model_name,
-    #      device=device)

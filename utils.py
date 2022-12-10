@@ -11,6 +11,13 @@ import matplotlib.pyplot as plt
 
 # def _table(phase, x, y, columns, _type):
     
+def get_columns(num_classes):
+    temp = []
+    for i in range(num_classes):
+        for l in ["acc_", "loss_"]:
+            temp.append(l + str(i))
+    return temp
+
 def log_to_wandb(train_dict, val_dict, num_classes):
     # train
     table = wandb.Table(data=[[x, y] for (x, y) in \
@@ -41,44 +48,23 @@ def log_to_wandb(train_dict, val_dict, num_classes):
                             zip(train_dict["epoch"].tolist(), 
                                 train_dict["acc_{}".format(i)].tolist())], \
                                 columns = ["epoch", "accuracy"])
-        wandb.log({"train_acc_{}".format(i) : wandb.plot.line(table, "epoch", "accuracy", title="train/class {}".format(i))})
+        wandb.log({"train_acc_{}".format(i) : wandb.plot.line(table, "epoch", "accuracy", title="train/accuracy/class {}".format(i))})
         table = wandb.Table(data=[[x, y] for (x, y) in \
                             zip(train_dict["epoch"].tolist(), 
                                 train_dict["loss_{}".format(i)].tolist())], \
                                 columns = ["epoch", "loss"])
-        wandb.log({"train_loss_{}".format(i) : wandb.plot.line(table, "epoch", "loss", title="train/class {}".format(i))})
+        wandb.log({"train_loss_{}".format(i) : wandb.plot.line(table, "epoch", "loss", title="train/loss/class {}".format(i))})
         # valid
         table = wandb.Table(data=[[x, y] for (x, y) in \
                             zip(val_dict["epoch"].tolist(), 
                                 val_dict["acc_{}".format(i)].tolist())], \
                                 columns = ["epoch", "accuracy"])
-        wandb.log({"valid_acc_{}".format(i) : wandb.plot.line(table, "epoch", "accuracy", title="valid/class {}".format(i))})
+        wandb.log({"valid_acc_{}".format(i) : wandb.plot.line(table, "epoch", "accuracy", title="valid/accuracy/class {}".format(i))})
         table = wandb.Table(data=[[x, y] for (x, y) in \
                             zip(val_dict["epoch"].tolist(), 
                                 val_dict["loss_{}".format(i)].tolist())], \
                                 columns = ["epoch", "loss"])
-        wandb.log({"train_loss_{}".format(i) : wandb.plot.line(table, "epoch", "loss", title="valid/class {}".format(i))})
-        
-        
-        # fig = plt.figure()
-        # for i in range(num_classes):
-        #     ax = fig.add_subplot(2, i + 1, 1)
-        #     ax.plot(train_dict["epoch"].tolist(), train_dict["acc_{}".format(i)].tolist())
-        #     ax = fig.add_subplot(2, i + 1, 2)
-        #     ax.plot(train_dict["epoch"].tolist(), train_dict["loss_{}".format(i)].tolist())
-            
-        # wandb.log({"train_chart": fig})
-        # fig.clear()
-        
-        # fig = plt.figure()
-        # for i in range(num_classes):
-        #     ax = fig.add_subplot(2, i + 1, 1)
-        #     ax.plot(val_dict["epoch"].tolist(), val_dict["acc_{}".format(i)].tolist())
-        #     ax = fig.add_subplot(2, i + 1, 2)
-        #     ax.plot(val_dict["epoch"].tolist(), val_dict["loss_{}".format(i)].tolist())
-            
-        # wandb.log({"valid_chart": fig})
-            
+        wandb.log({"valid_loss_{}".format(i) : wandb.plot.line(table, "epoch", "loss", title="valid/loss/class {}".format(i))})
 
 def save_params(weights_path,
                 save_path,
