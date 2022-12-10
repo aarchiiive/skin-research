@@ -312,3 +312,5 @@ def train(dataset_path,
                 num_classes,
                 resume=resume,
                 start=start)
+    
+    wandb.finish(1, quiet=True)
