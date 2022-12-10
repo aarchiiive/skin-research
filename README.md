@@ -4,10 +4,10 @@
 
 main.py 안의 주석을 확인해주세요!
 
-필요한 라이브러리 설치하기
+wandb 설치하기
 
 ```
-pip install -r requirements.txt
+pip install wandb
 ```
 
 data폴더를 생성해주세요.
