@@ -4,9 +4,9 @@ if __name__ == "__main__":
     """모델 학습
 
     Args:
-        dataset_path (_type_): train, test, label 폴더가 있는 상위 폴더 이름을 입력해주세요 ex) "data"
-        save_path (_type_): weights와 log.txt를 저장할 경로를 입력해주세요 ex) "lab01", "lab14" 
-        model_name (_type_): 학습시킬 모델명을 입력해주세요(아래의 model_list 참고) ex) "resnet50", "efficientnet_v2_l"
+        dataset_path (str): train, test, label 폴더가 있는 상위 폴더 이름을 입력해주세요 ex) "data"
+        save_path (str): weights와 log.txt를 저장할 경로를 입력해주세요 ex) "lab01", "lab14" 
+        model_name (str): 학습시킬 모델명을 입력해주세요(아래의 model_list 참고) ex) "resnet50", "efficientnet_v2_l"
         num_epochs (int, optional): 총 학습시킬 epoch. Defaults to 25.
         input_size (int, optional): 이미지의 사이즈. Defaults to 600.
         class_names (list, optional): 분류시킬 class의 이름들. Defaults to ["level 0", "level 1", "level 2", "level 3"].
@@ -18,7 +18,7 @@ if __name__ == "__main__":
         num_workers (int, optional): cpu 코어 성능에 따라서 늘리거나 줄여주세요. Defaults to 10.
         resume (bool, optional): 학습을 재개하고 싶다면 True를 넣어주세요 -> save_path에 있는 last.pt를 불러옴. Defaults to False.
         use_wandb (bool, optional): wandb를 사용한다면 True로 설정. Defaults to False.
-        project_name (_type_, optional): wandb에 사용할 프로젝트 이름. Defaults to None.
+        project_name (str, optional): wandb에 사용할 프로젝트 이름. Defaults to None.
         start (int, optional): _description_. Defaults to 0.
         
     [model list]

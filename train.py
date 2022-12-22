@@ -240,6 +240,7 @@ def train(dataset_path,
           project_name=None,
           start=0):
     
+    
     num_classes = len(class_names)
     if not os.path.isdir("weights"):
         os.mkdir("weights")

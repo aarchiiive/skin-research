@@ -150,9 +150,9 @@ if __name__ == "__main__":
     """_summary_
 
     Args:
-        weights_paths (_type_): weights(.pt) 파일이 저장된 폴더이름들(학습 때 넣었던 폴더 이름과 동일) -> 두개 이상 넣으면 됨
-        class_names (_type_): label의 이름이 담긴 리스트
-        project_name (_type_, optional): wandb에 사용할 프로젝트 이름. Defaults to None.
+        weights_paths (List): weights(.pt) 파일이 저장된 폴더이름들(학습 때 넣었던 폴더 이름과 동일) -> 두개 이상 넣으면 됨
+        class_names (List): label의 이름이 담긴 리스트
+        project_name (str, optional): wandb에 사용할 프로젝트 이름. Defaults to None.
         use_wandb (bool, optional): wandb를 사용한다면 True. Defaults to True.
         select (str, optional): "best"(가장 나은 가중치)와 "last"(학습 중 마지막 가중치)중 선택. Defaults to "best".
     """
