@@ -3,14 +3,15 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 
 import os
+import gc
+import cv2
 import numpy as np
 import pandas as pd
 from PIL import Image
 import wandb
+from tqdm import tqdm
 import matplotlib.pyplot as plt
 
-# def _table(phase, x, y, columns, _type):
-    
 def get_columns(num_classes):
     temp = []
     for i in range(num_classes):
@@ -77,26 +78,30 @@ def save_params(weights_path,
                 weight_decay=0.0005,
                 drop_rate=0.2,
                 batch_size=8,
-                num_workers=10):
-    wandb.init(project="skin-research", name=save_path+"-"+model_name, tags=[model_name])
+                num_workers=10,
+                use_wandb=False,
+                project_name=None):
+    
+    if use_wandb:
+        wandb.init(project=project_name, name=save_path+"-"+model_name, tags=[model_name], group="train")
 
-    # if os.path.isfile(os.path.join(weights_path, "train.csv")):
-    #     wandb.init(project="skin-research", name=save_path+"-"+model_name, resume=True)
-    # else:
-    #     wandb.init(project="skin-research", name=save_path+"-"+model_name)
-        
-    wandb.config = {
-        "model_name" : model_name,
-        "num_epochs" : num_epochs,
-        "input_size" : input_size,
-        "num_classes" : num_classes,
-        "optimizer" : optimizer,
-        "learning_rate" : learning_rate,
-        "weight_decay" : weight_decay,
-        "drop_rate" : drop_rate,
-        "batch_size" : batch_size,
-        "num_workers" : num_workers
-    }
+        # if os.path.isfile(os.path.join(weights_path, "train.csv")):
+        #     wandb.init(project="skin-research", name=save_path+"-"+model_name, resume=True)
+        # else:
+        #     wandb.init(project="skin-research", name=save_path+"-"+model_name)
+            
+        wandb.config = {
+            "model_name" : model_name,
+            "num_epochs" : num_epochs,
+            "input_size" : input_size,
+            "num_classes" : num_classes,
+            "optimizer" : optimizer,
+            "learning_rate" : learning_rate,
+            "weight_decay" : weight_decay,
+            "drop_rate" : drop_rate,
+            "batch_size" : batch_size,
+            "num_workers" : num_workers
+        }
     
     df = pd.DataFrame.from_dict({
         "model_name" : [model_name],
@@ -125,8 +130,8 @@ def dataloader(train_path,
     
     # augentations
     train_transform = transforms.Compose([
-        transforms.Resize((input_size, input_size)),
         transforms.ToTensor(),
+        transforms.Resize((input_size, input_size)),
         transforms.RandomAffine(degrees=(-15, 15), translate=(0.05, 0.1)),
         transforms.RandomResizedCrop(size=(input_size, input_size), scale=(0.75, 1.0)),
         transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
@@ -135,8 +140,8 @@ def dataloader(train_path,
     ])
 
     test_transform = transforms.Compose([
-        transforms.Resize((input_size, input_size)),
         transforms.ToTensor(),
+        transforms.Resize((input_size, input_size)),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
     
@@ -192,6 +197,35 @@ class CustomImageDataset(Dataset):
     def __len__(self):
         return len(os.listdir(self.img_dir))
     
+def predictions(model, test_loader, device):
+    total_probs = None
+    total_preds = None
+    true_labels = None
+    gc.collect()
+    torch.cuda.empty_cache()
+    model = model.to(device)
+    model.eval()
+    with torch.no_grad():
+        for images, labels in tqdm(test_loader):
+            images = images.to(device)
+            labels = labels.to(device)
+            outputs = model(images)
+            _, preds = torch.max(outputs, 1)
+
+            true_labels = labels if true_labels is None else torch.cat((true_labels, labels),dim=0)
+            total_probs = outputs if total_probs is None else torch.cat((total_probs, outputs),dim=0)
+            total_preds = preds if total_preds is None else torch.cat((total_preds, preds),dim=0)
+
+    return total_probs.cpu(), total_preds.cpu(), true_labels.cpu().numpy()
+
+def confidence_interval(auc, labels, z=1.959964):
+    _, counts = np.unique(labels, return_counts=True)
+    n1, n2 = counts
+    q0 = auc * (1 - auc)
+    q1 = auc / (2 - auc) - auc**2
+    q2 = 2 * auc**2 / (1 + auc) - auc**2
+    se = np.sqrt((q0 + (n1 - 1)*q1 + (n2 - 1)*q2) / (n1 * n2))
+    return [auc - z*se, auc + z*se]
     
     
 if __name__ == "__main__":

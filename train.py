@@ -30,24 +30,29 @@ def train_model(model,
                 num_epochs=25,
                 batch_size=16,
                 num_classes=4, 
+                class_names=None,
                 resume=False,
+                use_wandb=False,
                 start=0):
-
+    
+    since = time.time()
     weights_path = os.path.join("weights", save_path)
+    best_acc = 0
+    max_acc = [0 for _ in range(num_classes)]
     
     if not os.path.isdir(weights_path):
         os.mkdir(weights_path)
     
     if torch.cuda.device_count() > 1:
-        model = torch.nn.DataParallel(model, device_ids=range(8))
+        print("Training with multiple devices")
+        model = torch.nn.DataParallel(model, device_ids=range(torch.cuda.device_count()))
+    else:
+        model = model.to(device)
     
-    since = time.time()
-    best_acc = 0.0
-    
-    model = copy.deepcopy(model)
-    model = model.to(device)
-    wandb.watch(model, log='all')
     criterion = criterion.to(device)
+    
+    if use_wandb:
+        wandb.watch(model, log='all')
     
     learning_dict = {"train" : [],
                      "val" : []}
@@ -56,7 +61,7 @@ def train_model(model,
                      + ["best", "accuracy", "loss"]
     
     if resume or os.path.isfile(os.path.join(weights_path, "train.csv")):
-        print("Restart training model....")
+        print("Restart training model saved in {}".format(save_path))
         model.load_state_dict(torch.load(os.path.join(weights_path, "last.pt")))
         
         _train = pd.read_csv(os.path.join(weights_path, "train.csv"))
@@ -66,39 +71,26 @@ def train_model(model,
             learning_dict["train"].append(t)
             learning_dict["val"].append(v)
 
+        best_acc = int(_val["best"].tolist()[-1])
+        for i in range(num_classes):
+            max_acc[i] = _val["acc_{}".format(i)].max()
         start = len(_train)
         
-    class_names = [str(i) for i in range(num_classes)]
-    max_acc = {"train" : [0 for _ in range(num_classes)],
-               "val" : [0 for _ in range(num_classes)]}  
-    running_losses = {"train" : [0 for _ in range(num_classes)],
-                      "val" : [0 for _ in range(num_classes)]}
-    total_preds = {"train" : [0 for _ in range(num_classes)],
-                  "val" : [0 for _ in range(num_classes)]}
-    correct_preds = {"train" : [0 for _ in range(num_classes)],
-                    "val" : [0 for _ in range(num_classes)]}
+    if class_names is None:
+        class_names = [str(i) for i in range(num_classes)]
     
     try:
         for epoch in range(start, num_epochs):
             print(f'Epoch {epoch}/{num_epochs - 1}')
             print('-' * 120)
-
-            for phase in ["train", "val"]:
-                if phase == "train":
+            for phase in ['train', 'val']:
+                if phase == 'train':
                     model.train()
                 else:
                     model.eval()
 
-                running_loss = 0.0
-                
-                for l in [running_losses, total_preds, correct_preds]:
-                    for p in ["train", "val"]:
-                        l[p] = [0 for _ in range(num_classes)]
-                        
-                # metrics = dict()
-                running_labels = None
-                running_probs = None
-                running_preds = None
+                running_loss = running_corrects = 0
+                epoch_labels = epoch_probs = epoch_preds = None
                 
                 gc.collect()
                 torch.cuda.empty_cache()
@@ -106,95 +98,98 @@ def train_model(model,
                 for inputs, labels in tqdm(dataloaders[phase]):
                     inputs = inputs.to(device)
                     labels = labels.to(device)
-                
-                    optimizer.zero_grad()
                     
+                    optimizer.zero_grad()
 
-                    with torch.set_grad_enabled(phase == "train"):
+                    with torch.set_grad_enabled(phase == 'train'):  
                         outputs = model(inputs)
                         _, preds = torch.max(outputs, 1)
                         loss = criterion(outputs, labels.long())
-                        
-                        for label, output, pred in zip(labels, outputs, preds):
-                            if label == pred:
-                                correct_preds[phase][label] += 1
-                            total_preds[phase][label] += 1
-                            running_losses[phase][label] += criterion(output, label.long())
 
-                        if phase == "train":
+                        if phase == 'train':
                             loss.backward()
                             optimizer.step()
-                        else:
-                            if running_labels is None:
-                                running_labels = labels
-                                running_probs = outputs
-                                running_preds = preds
-                            else:
-                                running_labels = torch.cat((running_labels, labels),dim=0)
-                                running_probs = torch.cat((running_probs, outputs),dim=0)
-                                running_preds = torch.cat((running_preds, preds),dim=0)
                         
                     running_loss += loss.item() * inputs.size(0)
+                    running_corrects += torch.sum(preds == labels.data)
                     
-                print("\n[{}]".format(phase))
+                    if epoch_labels is None:
+                        epoch_labels = labels
+                        epoch_probs = outputs
+                        epoch_preds = preds
+                    else:
+                        epoch_labels = torch.cat((epoch_labels, labels),dim=0)
+                        epoch_probs = torch.cat((epoch_probs, outputs),dim=0)
+                        epoch_preds = torch.cat((epoch_preds, preds),dim=0)
                 
+                print("\n- {}".format(phase))
                 row = [epoch]
                 
-                for i, correct_count in enumerate(correct_preds[phase]):
-                    accuracy = 100 * float(correct_count) / total_preds[phase][i]
-                    loss = running_losses[phase][i].item() / total_preds[phase][i]
+                _, total_counts = torch.unique(epoch_labels, return_counts=True)
+                
+                for i in range(num_classes):
+                    acc = loss = 0 
+                    for prob, pred, label in zip(epoch_probs, epoch_preds, epoch_labels):
+                        if label == i:
+                            loss += criterion(prob.reshape(1, -1), label.reshape(1).long())
+                            if pred == i: acc += 1
+
+                    acc = acc / total_counts[i] * 100
+                    loss = loss / total_counts[i]
                     
-                    if accuracy > max_acc[phase][i]:
-                        max_acc[phase][i] = accuracy
-                        torch.save(model.state_dict(), os.path.join(weights_path, "best_{}.pt".format(i)))
+                    if acc > max_acc[i]:
+                        max_acc[i] = acc
+                        if num_classes > 2:
+                            torch.save(model.state_dict(), os.path.join(weights_path, "best_{}.pt".format(i)))
                         
-                    row.append(accuracy)
-                    row.append(loss)
-                    # if phase == "val":
-                    #     metrics['val_acc_{}'.format(i)] = accuracy
-                    #     metrics['val_loss_{}'.format(i)] = loss
-                    
-                    print("Accuracy for class(level {}) : {:.4f}% ({}/{}), best : {:.4f}%, loss : {:.4f}".\
-                        format(i, accuracy, correct_count, 
-                               total_preds[phase][i], max_acc[phase][i], loss))    
-                
-                total = sum(correct_preds[phase]) / sum(total_preds[phase]) * 100
+                    if phase == "train": print("[{}] Accuracy : {:.6f} | Loss : {:.6f}".format(class_names[i], acc, loss))
+                    elif phase == "val": print("[{}] Accuracy : {:.6f} | Loss : {:.6f} | Best : {:.6f}".format(class_names[i], acc, loss, max_acc[i]))
+                    row.append(acc.item())
+                    row.append(loss.item())
+                            
+                epoch_acc = running_corrects.double() / len(dataloaders[phase].dataset) * 100
                 epoch_loss = running_loss / len(dataloaders[phase].dataset)
-                if total > best_acc  and phase == "val":
-                    best_acc = total
-                    torch.save(model.state_dict(), os.path.join(weights_path, "best.pt"))
                 
-                row.append(best_acc)
-                row.append(total)
-                row.append(epoch_loss)
-                
-                if phase == "val":
-                    # metrics["val_acc"] = total
-                    # metrics["val_loss"] = epoch_loss
-                    # wandb.log(metrics, step=epoch)
-                    wandb.log({"pr" : wandb.plot.pr_curve(running_labels.cpu(), running_probs.cpu(), labels=class_names, classes_to_plot=None)})
-                    wandb.log({"roc" : wandb.plot.roc_curve(running_labels.cpu(), running_probs.cpu(), labels=class_names, classes_to_plot=None)})
-                    print("Best accuracy  : {:.4f}%".format(best_acc))
-                else:
-                    pass
-                    # metrics["train_acc"] = total
-                    # metrics["train_loss"] = epoch_loss
-                    # wandb.log(metrics, step=epoch)
-                    
-                print("Total accuracy : {:.4f}%".format(total))
-                print("Total loss     : {:.4f}%".format(epoch_loss))
+                print()
                 
                 if phase == "train":
                     scheduler.step()
-            
+                    print("Total accuracy : {:.6f}%".format(epoch_acc))
+                    print("Total loss     : {:.6f}".format(epoch_loss))
+                    
+                elif phase == "val":
+                    if epoch_acc > best_acc:
+                        best_acc = epoch_acc.item()
+                        torch.save(model.state_dict(), os.path.join(weights_path, "best.pt"))
+                        
+                    if use_wandb:
+                        # metrics["val_acc"] = total
+                        # metrics["val_loss"] = epoch_loss
+                        # wandb.log(metrics, step=epoch)
+                        wandb.log({"pr" : wandb.plot.pr_curve(epoch_labels.cpu(), epoch_probs.cpu(), labels=class_names, classes_to_plot=None)})
+                        wandb.log({"roc" : wandb.plot.roc_curve(epoch_labels.cpu(), epoch_probs.cpu(), labels=class_names, classes_to_plot=None)})
+                        
+                    print("Total accuracy : {:.6f}%".format(epoch_acc))
+                    print("Best accuracy  : {:.6f}%".format(best_acc))
+                    print("Total loss     : {:.6f}".format(epoch_loss))
+                    
+                row.append(best_acc)
+                row.append(epoch_acc.item())
+                row.append(epoch_loss)
                 learning_dict[phase].append(row)
-                
+                    
             torch.save(model.state_dict(), os.path.join(weights_path, "last.pt"))
             train_dict = pd.DataFrame(learning_dict["train"], columns=learning_columns)
             val_dict = pd.DataFrame(learning_dict["val"], columns=learning_columns)
-            train_dict.to_csv(os.path.join(weights_path, "train.csv"), index=False)
-            val_dict.to_csv(os.path.join(weights_path, "val.csv"), index=False)
-            log_to_wandb(train_dict, val_dict, num_classes)
+            
+            try:
+                train_dict.to_csv(os.path.join(weights_path, "train.csv"), index=False)
+                val_dict.to_csv(os.path.join(weights_path, "val.csv"), index=False)
+            except:
+                print("Failed saving log files : permission denied")
+                
+            if use_wandb:
+                log_to_wandb(train_dict, val_dict, num_classes)
                 
             print()
             
@@ -203,18 +198,18 @@ def train_model(model,
         print(f'Training stopped in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s')
         print(f'Best val Acc: {best_acc:4f}')
         torch.save(model.state_dict(), os.path.join(weights_path, "last.pt"))
+        wandb.finish(1, quiet=True)
         
     except torch.cuda.OutOfMemoryError:
-        if epoch == 0:
-            os.remove(os.path.join(weights_path, "log.txt"))
+        wandb.finish(1, quiet=True)
         print("Error : torch.cuda.OutOfMemoryError")
         exit()
-        
-    finally:
+    except:
         time_elapsed = time.time() - since
         print(f'Training stopped in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s')
         print(f'Best val Acc: {best_acc:4f}')
         torch.save(model.state_dict(), os.path.join(weights_path, "last.pt"))
+        wandb.finish(1, quiet=True)
 
     time_elapsed = time.time() - since
     
@@ -224,15 +219,16 @@ def train_model(model,
     learning_dict["train"] = pd.DataFrame(learning_dict["train"], columns=learning_columns)
     learning_dict["val"] = pd.DataFrame(learning_dict["val"], columns=learning_columns)
     learning_dict["train"].to_csv(os.path.join(weights_path, "train.csv"), index=False)
-    learning_dict["val"].to_csv(os.path.join(weights_path, "valid.csv"), index=False)
+    learning_dict["val"].to_csv(os.path.join(weights_path, "val.csv"), index=False)
     torch.save(model.state_dict(), os.path.join(weights_path, "last.pt"))
+    wandb.finish(1, quiet=True)
     
 def train(dataset_path,
           save_path,
           model_name,
           num_epochs=25,
           input_size=600,
-          num_classes=4,
+          class_names=["level 0", "level 1", "level 2", "level 3"],
           optimize="adam",
           learning_rate=0.0001,
           weight_decay=0.0005,
@@ -240,14 +236,22 @@ def train(dataset_path,
           batch_size=8,
           num_workers=10,
           resume=False,
+          use_wandb=False,
+          project_name=None,
           start=0):
-
     
+    num_classes = len(class_names)
     if not os.path.isdir("weights"):
         os.mkdir("weights")
     if not os.path.isdir(os.path.join("weights", save_path)):
         os.mkdir(os.path.join("weights", save_path))
-    
+    if num_classes != len(class_names):
+        print("length of class names must be equal to number of classes")
+        exit()
+    if use_wandb and project_name == None:
+        print("Set project name for using wandb")
+        exit()
+            
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     # device = torch.device("cpu")
     # device = torch.device("mps")
@@ -265,7 +269,9 @@ def train(dataset_path,
                 weight_decay,
                 drop_rate,
                 batch_size,
-                num_workers)
+                num_workers,
+                use_wandb,
+                project_name)
     
     # dataloaders
     trainloader, testloader = dataloader(os.path.join(dataset_path, "train"),
@@ -310,7 +316,9 @@ def train(dataset_path,
                 num_epochs,
                 batch_size,
                 num_classes,
+                class_names,
                 resume=resume,
+                use_wandb=use_wandb,
                 start=start)
-    
+
     wandb.finish(1, quiet=True)

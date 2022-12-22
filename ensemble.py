@@ -1,12 +1,33 @@
 import torch
-import numpy as np
-from sklearn import metrics
+import torch.nn as nn
+
+import gc
+import time
+import wandb
 import pickle
+from tqdm import tqdm
+import operator
+from sklearn import metrics
 
 from utils import *
 from model import _models
 
-def log(project_name, weights_path, preds, probs, labels, model_name, num_classes, class_names, use_wandb=False):
+def hard_voting(probs):
+    probs = torch.stack(probs, dim=1)
+    probs = probs.permute(0, 2, 1)
+    probs, _ = torch.max(probs, dim=2)
+    _, preds = torch.max(probs, dim=1)
+    return probs.numpy(), preds.numpy()
+    
+def soft_voting(probs):
+    probs = torch.stack(probs, dim=1)
+    probs = probs.permute(0, 2, 1)
+    probs = torch.mean(probs, dim=2)
+    _, preds = torch.max(probs, dim=1)
+    return probs.numpy(), preds.numpy()
+    
+def log(project_name, preds, probs, labels, model_list, num_classes, class_names, mode="hard", use_wandb=False):
+    print(f"[{mode} voting]") 
     accuracy = metrics.accuracy_score(labels, preds)
     f1_score = metrics.f1_score(labels, preds, average=None)
     confusion_matrix = metrics.multilabel_confusion_matrix(labels, preds, labels=range(num_classes))
@@ -41,15 +62,11 @@ def log(project_name, weights_path, preds, probs, labels, model_name, num_classe
         _fnr.append((fn/(tp+fn))*100)
         _auc.append(auc*100)
         _acc.append(acc*100)
-        
-    print("- total")
-    print("F1 score    : {}".format(metrics.f1_score(labels, preds, average="micro")*100))
-    print("Accuracy    : {}".format(accuracy*100))
     # print("95% confidence interval of AUC : {}".format(confidence_interval(auc, labels)))
     print()
 
     if use_wandb:
-        wandb.init(project=project_name, name=weights_path+"-"+model_name, tags=[model_name], group="single")
+        wandb.init(project=project_name, name="+".join(model_list)+"({})".format(mode), tags=model_list, group="ensemble")
         table = wandb.Table(data=[[x, y] for (x, y) in \
                               zip(class_names, f1_score)], columns = ["label", "f1 score"])
         wandb.log({"f1 score/class" : wandb.plot.bar(table, "label", "f1 score", title="F1 score")})
@@ -85,44 +102,55 @@ def log(project_name, weights_path, preds, probs, labels, model_name, num_classe
         wandb.log({"roc" : wandb.plot.roc_curve(labels, probs, labels=class_names)})
         wandb.finish(1, quiet=True)
 
-def test_model(weights_path, 
-               class_names, 
-               project_name=None, 
-               use_wandb=True,
-               select="best"):
+def ensemble(weights_paths, 
+             class_names, 
+             project_name=None, 
+             use_wandb=True,
+             select="best"):
     
+    probs = []
+    preds = []
+    labels = None
     num_classes = len(class_names)
-    model_name = pd.read_csv(os.path.join("weights", weights_path, "hyperparameters.csv"))["model_name"].item()
-    model = _models(model_name, num_classes, drop_rate=0)
-    
-    if select == "last":
-        model.load_state_dict(torch.load(os.path.join("weights", weights_path, "last.pt")))
-    else:
-        model.load_state_dict(torch.load(os.path.join("weights", weights_path, "best.pt")))
     
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     testloader = get_testloader("data/test/", "data/label/test.csv", input_size=600, batch_size=16)
-    model = model.to(device)
-    
-    if not os.path.isfile(os.path.join("weights", weights_path, "preds.pickle")):
-        probs, preds, labels = predictions(model, testloader, device)
-        with open(os.path.join("weights", weights_path, "preds.pickle"), 'wb') as f:
-            pickle.dump([probs, preds, labels], f, pickle.HIGHEST_PROTOCOL)
-    else:
-        with open(os.path.join("weights", weights_path, "preds.pickle"), 'rb') as f:
-            probs, preds, labels = pickle.load(f)
-            
-    probs = probs.numpy()
-    preds = preds.numpy()
-            
-    print("{} : {}".format(model_name, metrics.accuracy_score(labels, preds.ravel())))
-    log(project_name, weights_path, preds, probs, labels, model_name, num_classes, class_names, use_wandb)
+    model_list = [pd.read_csv(os.path.join("weights", w, "hyperparameters.csv"))["model_name"][0] for w in weights_paths]
+    models = [_models(m, num_classes=num_classes, drop_rate=0) for m in model_list]
 
+    for p, model in zip(weights_paths, models):
+        if select == "last":
+            model.load_state_dict(torch.load(os.path.join("weights", p, "last.pt")))
+        else:
+            model.load_state_dict(torch.load(os.path.join("weights", p, "best.pt")))
+            
+        if not os.path.isfile(os.path.join("weights", p, "preds.pickle")):
+            _probs, _preds, labels = predictions(model, testloader, device)
+            with open(os.path.join("weights", p, "preds.pickle"), 'wb') as f:
+                pickle.dump([_probs, _preds, labels], f, pickle.HIGHEST_PROTOCOL)
+        else:
+            with open(os.path.join("weights", p, "preds.pickle"), 'rb') as f:
+                _probs, _preds, labels = pickle.load(f)
+                
+        probs.append(_probs)
+        preds.append(_preds)
+        
+    print("[single model accuracy]")
+    for i, m in enumerate(model_list):
+        print("{} : {}".format(m, metrics.accuracy_score(labels, preds[i].ravel())))
+    print()
+    
+    hard_probs, hard_preds = hard_voting(probs)
+    soft_probs, soft_preds = soft_voting(probs)
+    
+    log(project_name, hard_preds, hard_probs, labels, model_list, num_classes, class_names, mode="hard", use_wandb=use_wandb)
+    log(project_name, soft_preds, soft_probs, labels, model_list, num_classes, class_names, mode="soft", use_wandb=use_wandb)
+    
 if __name__ == "__main__":
     """_summary_
 
     Args:
-        weights_paths (_type_): weights(.pt) 파일이 저장된 폴더이름
+        weights_paths (_type_): weights(.pt) 파일이 저장된 폴더이름들(학습 때 넣었던 폴더 이름과 동일) -> 두개 이상 넣으면 됨
         class_names (_type_): label의 이름이 담긴 리스트
         project_name (_type_, optional): wandb에 사용할 프로젝트 이름. Defaults to None.
         use_wandb (bool, optional): wandb를 사용한다면 True. Defaults to True.
@@ -130,5 +158,8 @@ if __name__ == "__main__":
     """
     project_name = "skin"
     class_names = ["level 0", "level 1", "level 2", "level 3"]
-    test_model("lab01", class_names, project_name, use_wandb=True)
+    ensemble(["lab01", "lab02", "lab03"], class_names, project_name=project_name, use_wandb=True) # using wandb
+    ensemble(["lab01", "lab02"], class_names, project_name=project_name, use_wandb=True) # using wandb
+    ensemble(["lab01", "lab02", "lab03"], class_names) # without wandb
+    
     
