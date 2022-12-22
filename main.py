@@ -1,21 +1,24 @@
 from train import train
 
 if __name__ == "__main__":
-    """_summary_
+    """모델 학습
 
     Args:
         dataset_path (_type_): train, test, label 폴더가 있는 상위 폴더 이름을 입력해주세요 ex) "data"
         save_path (_type_): weights와 log.txt를 저장할 경로를 입력해주세요 ex) "lab01", "lab14" 
-        model_name (_type_): 학습시킬 모델명을 입력해주세요(model.py의 _model 함수 참고) ex) "resnet50", "efficientnet_v2_l"
+        model_name (_type_): 학습시킬 모델명을 입력해주세요(아래의 model_list 참고) ex) "resnet50", "efficientnet_v2_l"
         num_epochs (int, optional): 총 학습시킬 epoch. Defaults to 25.
         input_size (int, optional): 이미지의 사이즈. Defaults to 600.
-        num_classes (int, optional): 분류시킬 class의 개수. Defaults to 4.
+        class_names (list, optional): 분류시킬 class의 이름들. Defaults to ["level 0", "level 1", "level 2", "level 3"].
+        optimize (str, optional): _description_. Defaults to "adam".
         learning_rate (float, optional): learning rate. Defaults to 0.0001.
         weight_decay (float, optional): weight decay (parameter in Adam). Defaults to 0.0005.
         drop_rate (float, optional): 모델의 마지막 fc layer에서 적용할 dropout 비율. Defaults to 0.2.
-        batch_size (int, optional): batch size -> gpu 성능에 따라서 늘리거나 줄여주세요. Defaults to 8.
+        batch_size (int, optional):  batch size -> gpu 성능에 따라서 늘리거나 줄여주세요. Defaults to 8.
         num_workers (int, optional): cpu 코어 성능에 따라서 늘리거나 줄여주세요. Defaults to 10.
-        resume (_type_, optional): 학습을 재개하고 싶다면 True를 넣어주세요 -> save_path에 있는 last.pt를 불러옴 . Defaults to None.
+        resume (bool, optional): 학습을 재개하고 싶다면 True를 넣어주세요 -> save_path에 있는 last.pt를 불러옴. Defaults to False.
+        use_wandb (bool, optional): wandb를 사용한다면 True로 설정. Defaults to False.
+        project_name (_type_, optional): wandb에 사용할 프로젝트 이름. Defaults to None.
         start (int, optional): _description_. Defaults to 0.
         
     [model list]
@@ -58,6 +61,6 @@ if __name__ == "__main__":
     wandb를 사용할 경우 use_wandb를 True로, 사용하실 project_name을 설정해주세요.
     """
     train("data", "lab01", "resnet50", batch_size=2, num_workers=8, use_wandb=True, project_name="skin-training")
-    train("data", "lab02", "densenet161", batch_size=16, num_workers=16, use_wandb=True, project_name="skin-training")
+    train("data", "lab02", "densenet161", batch_size=16, num_workers=16, num_epochs=50, use_wandb=True, project_name="skin-training")
     train("data", "lab03", "resnext50", batch_size=16, num_workers=32) # without wandb
     train("data", "lab04", "xception41", batch_size=8, num_workers=16, use_wandb=True, project_name="skin-training")
