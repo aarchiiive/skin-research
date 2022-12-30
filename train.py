@@ -19,6 +19,7 @@ import pandas as pd
 from model import _models
 from utils import *
 from test import *
+from parallel import DataParallelModel, DataParallelCriterion
 
 def train_model(model, 
                 dataloaders, 
@@ -35,6 +36,7 @@ def train_model(model,
                 use_wandb=False,
                 start=0):
     
+    n_gpus = torch.cuda.device_count()
     since = time.time()
     weights_path = os.path.join("weights", save_path)
     best_acc = 0
@@ -42,14 +44,6 @@ def train_model(model,
     
     if not os.path.isdir(weights_path):
         os.mkdir(weights_path)
-    
-    if torch.cuda.device_count() > 1:
-        print("Training with multiple devices")
-        model = torch.nn.DataParallel(model, device_ids=range(torch.cuda.device_count()))
-    else:
-        model = model.to(device)
-    
-    criterion = criterion.to(device)
     
     if use_wandb:
         wandb.watch(model, log='all')
@@ -62,7 +56,11 @@ def train_model(model,
     
     if resume or os.path.isfile(os.path.join(weights_path, "train.csv")):
         print("Restart training model saved in {}".format(save_path))
-        model.load_state_dict(torch.load(os.path.join(weights_path, "last.pt")))
+        if n_gpus > 1:
+            model.load_state_dict(torch.load(os.path.join(weights_path, "last.pt"), \
+                map_location={f"cuda:{i}": f"cuda:{i}" for i in range(n_gpus)}))
+        else:
+            model.load_state_dict(torch.load(os.path.join(weights_path, "last.pt")))
         
         _train = pd.read_csv(os.path.join(weights_path, "train.csv"))
         _val = pd.read_csv(os.path.join(weights_path, "val.csv"))
@@ -75,6 +73,17 @@ def train_model(model,
         for i in range(num_classes):
             max_acc[i] = _val["acc_{}".format(i)].max()
         start = len(_train)
+
+    loss_fn = copy.deepcopy(criterion)
+    loss_fn = loss_fn.to(device)
+
+    if n_gpus > 1:
+        print("Training with multiple devices")
+        model = DataParallelModel(model, device_ids=range(n_gpus))
+        criterion = DataParallelCriterion(criterion, device_ids=range(n_gpus))
+
+    model = model.to(device)
+    criterion = criterion.to(device)
         
     if class_names is None:
         class_names = [str(i) for i in range(num_classes)]
@@ -96,23 +105,24 @@ def train_model(model,
                 torch.cuda.empty_cache()
 
                 for inputs, labels in tqdm(dataloaders[phase]):
-                    inputs = inputs.to(device)
-                    labels = labels.to(device)
-                    
                     optimizer.zero_grad()
-
                     with torch.set_grad_enabled(phase == 'train'):  
-                        outputs = model(inputs)
-                        _, preds = torch.max(outputs, 1)
-                        loss = criterion(outputs, labels.long())
+                        output = model(inputs) # 학습 시킬 사진들(batch_size만큼)을 모델에 넣고 outputs를 반환
+                        outputs = None
+                        for o in output:
+                            if outputs is None: outputs = o.cuda()
+                            else: outputs = torch.cat((outputs, o.cuda()),dim=0)
+                        _, preds = torch.max(outputs, 1) # label과 같은 정수 형태로 반환(0 or 1 or 2....)
+                        loss = criterion(output, labels) # loss 계산
 
                         if phase == 'train':
                             loss.backward()
                             optimizer.step()
-                        
-                    running_loss += loss.item() * inputs.size(0)
-                    running_corrects += torch.sum(preds == labels.data)
                     
+                    running_loss += loss.item() * inputs.size(0) # loss 계산
+                    running_corrects += torch.sum(preds == labels.cuda().data) # 정답이 맞은 개수 계산
+                    
+                    # 성능 검증을 위해 사용할 labels, probs, preds 저장
                     if epoch_labels is None:
                         epoch_labels = labels
                         epoch_probs = outputs
@@ -122,34 +132,36 @@ def train_model(model,
                         epoch_probs = torch.cat((epoch_probs, outputs),dim=0)
                         epoch_preds = torch.cat((epoch_preds, preds),dim=0)
                 
+                epoch_acc = running_corrects.double() / len(dataloaders[phase].dataset) * 100
+                epoch_loss = running_loss / len(dataloaders[phase].dataset)
+                
                 print("\n- {}".format(phase))
                 row = [epoch]
                 
                 _, total_counts = torch.unique(epoch_labels, return_counts=True)
                 
+                # class별 accuracy, loss 계산
                 for i in range(num_classes):
                     acc = loss = 0 
                     for prob, pred, label in zip(epoch_probs, epoch_preds, epoch_labels):
                         if label == i:
-                            loss += criterion(prob.reshape(1, -1), label.reshape(1).long())
+                            # loss += criterion(prob.reshape(1, -1), label.reshape(1))
+                            loss += loss_fn(prob.float(), label.cuda())
                             if pred == i: acc += 1
 
                     acc = acc / total_counts[i] * 100
                     loss = loss / total_counts[i]
                     
-                    if acc > max_acc[i]:
+                    if acc > max_acc[i] and phase == "val":
                         max_acc[i] = acc
                         if num_classes > 2:
-                            torch.save(model.state_dict(), os.path.join(weights_path, "best_{}.pt".format(i)))
+                            torch.save(model.module.state_dict(), os.path.join(weights_path, "best_{}.pt".format(i)))
                         
                     if phase == "train": print("[{}] Accuracy : {:.6f} | Loss : {:.6f}".format(class_names[i], acc, loss))
                     elif phase == "val": print("[{}] Accuracy : {:.6f} | Loss : {:.6f} | Best : {:.6f}".format(class_names[i], acc, loss, max_acc[i]))
                     row.append(acc.item())
                     row.append(loss.item())
                             
-                epoch_acc = running_corrects.double() / len(dataloaders[phase].dataset) * 100
-                epoch_loss = running_loss / len(dataloaders[phase].dataset)
-                
                 print()
                 
                 if phase == "train":
@@ -160,12 +172,9 @@ def train_model(model,
                 elif phase == "val":
                     if epoch_acc > best_acc:
                         best_acc = epoch_acc.item()
-                        torch.save(model.state_dict(), os.path.join(weights_path, "best.pt"))
+                        torch.save(model.module.state_dict(), os.path.join(weights_path, "best.pt"))
                         
                     if use_wandb:
-                        # metrics["val_acc"] = total
-                        # metrics["val_loss"] = epoch_loss
-                        # wandb.log(metrics, step=epoch)
                         wandb.log({"pr" : wandb.plot.pr_curve(epoch_labels.cpu(), epoch_probs.cpu(), labels=class_names, classes_to_plot=None)})
                         wandb.log({"roc" : wandb.plot.roc_curve(epoch_labels.cpu(), epoch_probs.cpu(), labels=class_names, classes_to_plot=None)})
                         
@@ -200,16 +209,16 @@ def train_model(model,
         torch.save(model.state_dict(), os.path.join(weights_path, "last.pt"))
         wandb.finish(1, quiet=True)
         
-    except torch.cuda.OutOfMemoryError:
-        wandb.finish(1, quiet=True)
-        print("Error : torch.cuda.OutOfMemoryError")
-        exit()
-    except:
-        time_elapsed = time.time() - since
-        print(f'Training stopped in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s')
-        print(f'Best val Acc: {best_acc:4f}')
-        torch.save(model.state_dict(), os.path.join(weights_path, "last.pt"))
-        wandb.finish(1, quiet=True)
+    # except torch.cuda.OutOfMemoryError:
+    #     wandb.finish(1, quiet=True)
+    #     print("Error : torch.cuda.OutOfMemoryError")
+    #     exit()
+    # except:
+    #     time_elapsed = time.time() - since
+    #     print(f'Training stopped in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s')
+    #     print(f'Best val Acc: {best_acc:4f}')
+    #     torch.save(model.state_dict(), os.path.join(weights_path, "last.pt"))
+    #     wandb.finish(1, quiet=True)
 
     time_elapsed = time.time() - since
     
