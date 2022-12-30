@@ -187,7 +187,7 @@ def train_model(model,
                 row.append(epoch_loss)
                 learning_dict[phase].append(row)
                     
-            torch.save(model.state_dict(), os.path.join(weights_path, "last.pt"))
+            torch.save(model.module.state_dict(), os.path.join(weights_path, "last.pt"))
             train_dict = pd.DataFrame(learning_dict["train"], columns=learning_columns)
             val_dict = pd.DataFrame(learning_dict["val"], columns=learning_columns)
             
@@ -206,7 +206,7 @@ def train_model(model,
         time_elapsed = time.time() - since
         print(f'Training stopped in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s')
         print(f'Best val Acc: {best_acc:4f}')
-        torch.save(model.state_dict(), os.path.join(weights_path, "last.pt"))
+        torch.save(model.module.state_dict(), os.path.join(weights_path, "last.pt"))
         wandb.finish(1, quiet=True)
         
     # except torch.cuda.OutOfMemoryError:
@@ -229,7 +229,7 @@ def train_model(model,
     learning_dict["val"] = pd.DataFrame(learning_dict["val"], columns=learning_columns)
     learning_dict["train"].to_csv(os.path.join(weights_path, "train.csv"), index=False)
     learning_dict["val"].to_csv(os.path.join(weights_path, "val.csv"), index=False)
-    torch.save(model.state_dict(), os.path.join(weights_path, "last.pt"))
+    torch.save(model.module.state_dict(), os.path.join(weights_path, "last.pt"))
     wandb.finish(1, quiet=True)
     
 def train(dataset_path,
